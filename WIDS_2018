@@ -1,0 +1,308 @@
+---
+title: "WIDS datathon"
+output: html_notebook
+---
+
+#Set working directory
+setwd("/Users/Swathi/Documents/Kaggle/WIDS_2018_datathon")
+
+#Read the training and test set
+train=read.csv("train.csv",header=TRUE,stringsAsFactors = FALSE)
+
+#Data cleaning
+train[is.na(train)] = "unknown"
+train[train==""] = "unknown"
+
+
+l = 0
+data1 = train
+n=ncol(train)
+for (i in 1:n)
+  if ( sum(train[,i]=="unknown") > 18255*0.80){
+    data1 = data1[,-(i-l)]
+    l = l + 1
+  }
+  
+str(data1)
+
+data2 = data1
+n1 = ncol(data1)
+for (i in 1: n1){
+  data2[,i] = as.factor(data1[,i])
+}
+str(data2)
+
+data3 = data2[,sapply(data2,nlevels)>1]
+data4=data3[,sapply(data3,nlevels)<40]
+
+#Check number of levels
+levels=lapply(data4,levels)
+levels=as.data.frame(stack(levels))
+write.csv(levels,"levels.csv")
+
+#Split data into training and testing set
+data4=data4[,-8]
+
+which(colnames(data4)=="FB15")
+data4=data4[,-328]
+
+
+
+data = data4
+dim(data)
+indexes = sample(1:nrow(data), size=0.2*nrow(data))
+testing = data[indexes,]
+dim(testing)  
+training = data[-indexes,]
+dim(training) 
+
+
+#Create logit model with all variables
+model=glm(is_female~.
+          ,training, family="binomial")
+
+#Configure parallel processing
+library(parallel)
+library(doParallel)
+
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+#Train the control
+library(mlbench)
+library(e1071)
+library(caret)
+fitControl <- trainControl(method = "cv",
+number = 5,
+allowParallel = TRUE)
+
+
+#Random forest
+
+model_rf <- train(is_female~., method="rf",data=training,trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+
+confusionMatrix.train(model_rf)
+#Random Forest model
+set.seed(123)
+library(randomForest)
+model_rf1=randomForest(is_female~.,data=training, importance=TRUE, ntrees=2000)
+pred=predict(model_rf1,testing)
+table(ActualValue=testing$is_female,PredictedValue=pred)
+
+#Try cforest
+
+set.seed(123)
+library(party)
+model_cf1=cforest(is_female~.,data=training)
+
+
+#Gradient boosting model
+
+
+#############################
+library(caret)
+library(e1071)
+library(Metrics)
+set.seed(123)
+
+fitControl=trainControl(method="repeatedcv", number=4, repeats=4)
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                        n.trees = 1000, 
+                        shrinkage = 0.01,
+                        n.minobsinnode = 20)
+model_gmb2=train(as.factor(is_female)~., data=training, method="gbm", trControl=fitControl, verbose=FALSE, tuneGrid = gbmGrid)
+
+summary=as.data.frame(summary(model_gmb2$finalModel))
+
+write.csv(summary,"summary_gbm.csv")
+
+predtraining=predict(model_gmb2, training, type="prob")[,2]
+predtesting=predict(model_gmb2, testing, type="prob")[,2]
+auc(training$is_female, predtraining)
+auc(testing$is_female, predtesting)
+
+################################
+
+#Run the data cleaning on test data
+
+test=read.csv("test.csv",header=TRUE,stringsAsFactors = FALSE)
+
+test[is.na(test)] = "unknown"
+test[test==""] = "unknown"
+
+colnames=as.vector(colnames(training))
+
+test=subset(test, select = names(test) %in% colnames)
+
+write.csv(test,"cleaned_test.csv")
+common <- intersect(names(train), names(test)) 
+for (p in common) { 
+  if (class(train[[p]]) == "factor") { 
+    levels(test[[p]]) <- levels(train[[p]]) 
+  } 
+}
+
+test[is.na(test)] = "unknown"
+
+test1 = test
+n1 = ncol(test)
+for (i in 1: n1){
+  test1[,i] = as.factor(test[,i])
+}
+
+
+
+#kfolds model
+
+set.seed(123)
+library(randomForest)
+classifier = randomForest(is_female~.,data=training,
+                            ntree = 500)
+  y_pred = predict(classifier, newdata = testing[-5], type="prob")[,2]
+  auc(testing$is_female, y_pred)
+
+# Running the gradient boost model on submission data
+
+subpred=predict( model_gmb2, test1, type="prob")[,2]
+summary(subpred)
+
+write.csv(subpred,"subpred.csv")
+
+
+
+
+##########OPTIMIZED MODEL###############
+#########USE THIS CODE
+
+#Fine tune the model
+
+summary=read.csv("summary_top40_filtered_v1.csv",header=TRUE,stringsAsFactors = FALSE)
+
+
+colnames=as.vector(colnames(summary))
+
+train1=subset(train, select = names(train) %in% colnames)
+
+#Data cleaning
+train1[is.na(train1)] = "unknown"
+train1[train1==""] = "unknown"
+
+
+l = 0
+data1 = train1
+n=ncol(train1)
+for (i in 1:n)
+  if ( sum(train1[,i]=="unknown") > 18255*0.8){
+    data1 = data1[,-(i-l)]
+    l = l + 1
+  }
+  
+str(data1)
+
+data2 = data1
+n1 = ncol(data1)
+for (i in 1: n1){
+  data2[,i] = as.factor(data1[,i])
+}
+str(data2)
+
+data3 = data2[,sapply(data2,nlevels)>1]
+data4=data3[,sapply(data3,nlevels)<40]
+
+which(colnames(data4)=="DL11")
+data4=data4[,-23] #Remove column DL11
+
+#Split data into training and testing set
+
+data = data4
+dim(data)
+indexes = sample(1:nrow(data), size=0.2*nrow(data))
+testing = data[indexes,]
+dim(testing)  
+training = data[-indexes,]
+dim(training) 
+
+#Run the data cleaning on test data
+
+test=read.csv("test.csv",header=TRUE,stringsAsFactors = FALSE)
+
+test[is.na(test)] = "unknown"
+test[test==""] = "unknown"
+
+colnames=as.vector(colnames(training))
+
+test=subset(test, select = names(test) %in% colnames)
+
+common <- intersect(names(train), names(test)) 
+for (p in common) { 
+  if (class(train[[p]]) == "factor") { 
+    levels(test[[p]]) <- levels(train[[p]]) 
+  } 
+}
+
+test[is.na(test)] = "unknown"
+
+test1 = test
+n1 = ncol(test)
+for (i in 1: n1){
+  test1[,i] = as.factor(test[,i])
+}
+
+levels(test$DG8a)=levels(training$DG8a)
+
+#kfolds model
+
+set.seed(123)
+library(randomForest)
+classifier = randomForest(is_female~.,data=training,
+                            ntree = 500)
+  y_pred = predict(classifier, testing, type="prob")[,2]
+  auc(testing$is_female, y_pred)
+
+#Gradient boosting model
+
+
+#############################
+library(caret)
+library(e1071)
+library(Metrics)
+set.seed(123)
+
+fitControl=trainControl(method="repeatedcv", number=4, repeats=4)
+gbmGrid <-  expand.grid(interaction.depth = 10,
+                    n.trees = c(500,1000,2000), 
+                    shrinkage = 0.1,
+                    n.minobsinnode = 10)
+model_gmb2_top40_s=train(as.factor(is_female)~., data=training, method="gbm", trControl=fitControl, verbose=FALSE, interaction.depth = 10,
+                    n.trees = 2000, 
+                    shrinkage = 0.1,
+                    n.minobsinnode = 10)
+
+summary=as.data.frame(summary(model_gmb2$finalModel))
+
+predtraining=predict(model_gmb2_top40_s, training, type="prob")[,2]
+predtesting=predict(model_gmb2_top40_s, testing, type="prob")[,2]
+auc(training$is_female, predtraining)
+auc(testing$is_female, predtesting)
+
+################################
+
+
+
+
+# Running the gradient boost model on submission data
+
+submission=read.csv("sample_submission.csv",header=TRUE,stringsAsFactors = FALSE)
+submission$is_female=predict(model_gmb2_top40_s, test1, type="prob")[,2]
+write.csv(submission,"submission.csv")
+
+subpred=predict( model_gmb2, test1, type="prob")[,2]
+summary(subpred)
+
+write.csv(subpred,"sub.csv")
+
+write.csv(data4,"cleaned_train.csv")
+write.csv(test1,"cleaned_test.csv")
